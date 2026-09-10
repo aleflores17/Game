@@ -4,15 +4,6 @@ A collection of games created with Pygame to learn game development fundamentals
 
 ## Games
 
-### Pong
-A classic two-player Pong game where players control paddles to hit a ball back and forth.
-
-**How to Play:**
-- **Player 1** (Left Paddle): Use `W` to move up, `S` to move down
-- **Player 2** (Right Paddle): Use `UP ARROW` to move up, `DOWN ARROW` to move down
-- First player to miss loses a point to the opponent
-- Press `ESC` or close the window to exit
-
 ### Race Game
 A top-down racing game where you compete against an AI opponent to reach 3000 distance first.
 
@@ -47,11 +38,6 @@ pip install -r requirements.txt
 ```
 
 ## Running the Games
-
-To play Pong:
-```bash
-python pong.py
-```
 
 To play Race Game:
 ```bash
