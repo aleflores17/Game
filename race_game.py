@@ -19,12 +19,15 @@ RED = (214, 40, 40)
 DARK_RED = (150, 25, 25)
 YELLOW = (255, 209, 51)
 DARK_YELLOW = (196, 158, 25)
-GRASS_GREEN = (58, 133, 58)
-GRASS_GREEN_DARK = (48, 116, 48)
-ROAD_GRAY = (90, 90, 94)
+GRASS_GREEN = (84, 184, 74)
+GRASS_GREEN_DARK = (54, 145, 62)
+ROAD_GRAY = (105, 105, 115)
 ROAD_GRAY_LINE = (255, 255, 255)
 BLUE = (60, 110, 214)
 SAND = (196, 168, 110)
+SKY_BLUE = (105, 205, 240)
+ITEM_PURPLE = (155, 75, 220)
+ITEM_PINK = (255, 120, 190)
 UI_PANEL = (18, 18, 22)
 UI_PANEL_BORDER = (240, 240, 240)
 GREEN = (60, 200, 90)
@@ -38,8 +41,9 @@ font = pygame.font.Font(None, 30)
 big_font = pygame.font.Font(None, 74)
 small_font = pygame.font.Font(None, 22)
 
-ROAD_LEFT = 100
-ROAD_RIGHT = SCREEN_WIDTH - 100
+# Narrower track framing shows more of the surroundings, like a zoomed-out view.
+ROAD_LEFT = 210
+ROAD_RIGHT = SCREEN_WIDTH - 210
 ROAD_WIDTH = ROAD_RIGHT - ROAD_LEFT
 CURB_WIDTH = 14
 
@@ -95,10 +99,12 @@ class Car(pygame.sprite.Sprite):
         self.rect.x = x
         self.rect.y = y
         self.speed = 0
-        self.max_speed = 10
-        self.acceleration = 0.3
-        self.friction = 0.15
+        self.max_speed = 8 if is_player else 5
+        self.acceleration = 0.2 if is_player else 0.15
+        self.friction = 0.1
         self.is_player = is_player
+        self.drift_charge = 0
+        self.boost_timer = 0
 
         # For steering "lean" visuals + smoothed AI avoidance
         self.tilt = 0
@@ -110,6 +116,7 @@ class Car(pygame.sprite.Sprite):
 
         if self.is_player and keys:
             # Player controls
+            drifting = keys[pygame.K_LSHIFT] or keys[pygame.K_RSHIFT]
             if keys[pygame.K_UP]:
                 self.speed = min(self.speed + self.acceleration, self.max_speed)
             elif keys[pygame.K_DOWN]:
@@ -127,6 +134,14 @@ class Car(pygame.sprite.Sprite):
             if keys[pygame.K_RIGHT]:
                 self.rect.x = min(self.rect.x + 5, ROAD_RIGHT - self.rect.width)
                 steer_dir = 1
+
+            if drifting and steer_dir:
+                self.drift_charge = min(self.drift_charge + 1, 90)
+            elif self.drift_charge >= 45:
+                self.boost_timer = 45
+                self.drift_charge = 0
+            else:
+                self.drift_charge = 0
         else:
             # AI acceleration
             if self.speed < self.max_speed * 0.7:
@@ -137,18 +152,27 @@ class Car(pygame.sprite.Sprite):
             desired = 0
             if obstacles:
                 for obstacle in obstacles:
-                    if abs(self.rect.x - obstacle.rect.x) < 100 and abs(self.rect.y - obstacle.rect.y) < 150:
-                        desired = 1 if self.rect.x < SCREEN_WIDTH // 2 else -1
+                    ahead = self.rect.centery - obstacle.rect.centery
+                    same_lane = abs(self.rect.centerx - obstacle.rect.centerx) < self.rect.width + 22
+                    if -150 < ahead < 100 and same_lane:
+                        # Move toward the side with more room instead of
+                        # repeatedly colliding with the same obstacle.
+                        left_room = self.rect.centerx - ROAD_LEFT
+                        right_room = ROAD_RIGHT - self.rect.centerx
+                        desired = 1 if right_room >= left_room else -1
                         break
 
             # Ease the dodge target toward the desired direction
             self.ai_dodge_target += (desired - self.ai_dodge_target) * 0.15
-            move = self.ai_dodge_target * 4
+            move = self.ai_dodge_target * 6
             self.rect.x += move
             steer_dir = 1 if move > 0.5 else (-1 if move < -0.5 else 0)
 
         # Move forward/backward
-        self.rect.y -= self.speed
+        if self.boost_timer > 0:
+            self.boost_timer -= 1
+        movement_speed = self.speed * (1.65 if self.boost_timer else 1)
+        self.rect.y -= movement_speed
 
         # Keep car on road
         self.rect.x = max(ROAD_LEFT, min(self.rect.x, ROAD_RIGHT - self.rect.width))
@@ -188,10 +212,30 @@ class Obstacle(pygame.sprite.Sprite):
         self.rect.y = y
 
     def update(self):
-        self.rect.y += 5
+        self.rect.y += 3
         if self.rect.top > SCREEN_HEIGHT:
             self.rect.bottom = 0
             self.rect.x = random.randint(ROAD_LEFT + 20, ROAD_RIGHT - 60)
+
+    def draw(self, surface):
+        surface.blit(self.image, self.rect)
+
+
+class ItemBox(pygame.sprite.Sprite):
+    def __init__(self, x, y):
+        super().__init__()
+        self.image = pygame.Surface((34, 34), pygame.SRCALPHA)
+        pygame.draw.rect(self.image, ITEM_PURPLE, (1, 1, 32, 32), border_radius=7)
+        pygame.draw.rect(self.image, ITEM_PINK, (4, 4, 26, 26), width=3, border_radius=5)
+        item_text = small_font.render("?", True, WHITE)
+        self.image.blit(item_text, item_text.get_rect(center=(17, 17)))
+        self.rect = self.image.get_rect(topleft=(x, y))
+
+    def update(self):
+        self.rect.y += 3
+        if self.rect.top > SCREEN_HEIGHT:
+            self.rect.bottom = 0
+            self.rect.x = random.randint(ROAD_LEFT + 20, ROAD_RIGHT - 54)
 
     def draw(self, surface):
         surface.blit(self.image, self.rect)
@@ -225,8 +269,10 @@ class RaceGame:
         self.player_car = Car(SCREEN_WIDTH // 2 - 20, SCREEN_HEIGHT - 100, is_player=True)
         self.ai_car = Car(SCREEN_WIDTH // 2 + 80, SCREEN_HEIGHT - 100, is_player=False)
         self.obstacles = [Obstacle(random.randint(ROAD_LEFT + 20, ROAD_RIGHT - 60), random.randint(-200, -50)) for _ in range(4)]
+        self.item_boxes = [ItemBox(random.randint(ROAD_LEFT + 20, ROAD_RIGHT - 54), random.randint(-450, -250)) for _ in range(3)]
         self.distance = 0
         self.ai_distance = 0
+        self.score = 0
         self.game_over = False
         self.winner = None
         self.scroll = 0  # for animating road dashes / curb stripes
@@ -253,8 +299,24 @@ class RaceGame:
                 self.player_car.rect.y += 20
 
             if self.ai_car.rect.colliderect(obstacle.rect):
-                self.ai_car.speed *= 0.5
-                self.ai_car.rect.y += 20
+                # Recover in one frame so the AI cannot get trapped against
+                # the same obstacle or lose all of its racing momentum.
+                direction = -1 if self.ai_car.rect.centerx > obstacle.rect.centerx else 1
+                self.ai_car.rect.x += direction * 28
+                self.ai_car.rect.x = max(
+                    ROAD_LEFT, min(self.ai_car.rect.x, ROAD_RIGHT - self.ai_car.rect.width)
+                )
+                self.ai_car.ai_dodge_target = direction
+                self.ai_car.speed = max(self.ai_car.speed, self.ai_car.max_speed * 0.6)
+                obstacle.rect.y = -random.randint(180, 320)
+                obstacle.rect.x = random.randint(ROAD_LEFT + 20, ROAD_RIGHT - 60)
+
+        for item_box in self.item_boxes:
+            if self.player_car.rect.colliderect(item_box.rect):
+                self.score += 100
+                self.player_car.boost_timer = 75
+                item_box.rect.y = -random.randint(250, 450)
+                item_box.rect.x = random.randint(ROAD_LEFT + 20, ROAD_RIGHT - 54)
 
     def update(self):
         if self.game_over:
@@ -264,11 +326,13 @@ class RaceGame:
 
         for obstacle in self.obstacles:
             obstacle.update()
+        for item_box in self.item_boxes:
+            item_box.update()
 
         self.check_collisions()
 
         # Track distance
-        self.distance += self.player_car.speed
+        self.distance += self.player_car.speed * (1.65 if self.player_car.boost_timer else 1)
         self.ai_distance += self.ai_car.speed
         self.scroll = (self.scroll + max(self.player_car.speed, 1)) % 50
 
@@ -281,7 +345,14 @@ class RaceGame:
             self.winner = "AI"
 
     def draw_track(self):
-        screen.fill(GRASS_GREEN)
+        screen.fill(SKY_BLUE)
+
+        # Bright cartoon-style hills behind the track.
+        pygame.draw.circle(screen, (75, 175, 80), (80, 160), 110)
+        pygame.draw.circle(screen, (75, 175, 80), (720, 180), 130)
+        pygame.draw.circle(screen, (255, 255, 255), (110, 70), 28)
+        pygame.draw.circle(screen, (255, 255, 255), (145, 70), 34)
+        pygame.draw.circle(screen, (255, 255, 255), (180, 70), 25)
 
         # Alternating dark/light grass stripes for movement feel
         stripe_h = 50
@@ -294,6 +365,8 @@ class RaceGame:
 
         # Road surface
         pygame.draw.rect(screen, ROAD_GRAY, (ROAD_LEFT, 0, ROAD_WIDTH, SCREEN_HEIGHT))
+        pygame.draw.line(screen, (70, 70, 80), (ROAD_LEFT, 0), (ROAD_LEFT, SCREEN_HEIGHT), 5)
+        pygame.draw.line(screen, (70, 70, 80), (ROAD_RIGHT, 0), (ROAD_RIGHT, SCREEN_HEIGHT), 5)
 
         # Checkered curbs on both edges
         curb_h = 20
@@ -309,6 +382,28 @@ class RaceGame:
         for y in range(-dash_h, SCREEN_HEIGHT + dash_h, dash_h * 2):
             yy = y + offset
             pygame.draw.rect(screen, ROAD_GRAY_LINE, (SCREEN_WIDTH // 2 - 3, yy, 6, dash_h))
+
+        # Trackside tire stacks and signs add a circuit-racing feel.
+        for y in range(-40, SCREEN_HEIGHT + 40, 80):
+            yy = (y + offset * 0.7) % (SCREEN_HEIGHT + 80) - 40
+            for x in (ROAD_LEFT - 34, ROAD_RIGHT + 14):
+                pygame.draw.circle(screen, BLACK, (x + 10, int(yy + 10)), 10)
+                pygame.draw.circle(screen, YELLOW, (x + 10, int(yy + 10)), 5)
+
+        # Bring the checkered finish line into view during the final stretch.
+        if self.distance >= 2700 or self.ai_distance >= 2700:
+            finish_y = 235
+            square = 16
+            for row in range(2):
+                for col in range(max(1, ROAD_WIDTH // square)):
+                    color = WHITE if (row + col) % 2 == 0 else BLACK
+                    pygame.draw.rect(
+                        screen,
+                        color,
+                        (ROAD_LEFT + col * square, finish_y + row * square, square, square),
+                    )
+            finish_text = font.render("FINISH", True, YELLOW)
+            screen.blit(finish_text, (SCREEN_WIDTH // 2 - finish_text.get_width() // 2, finish_y - 34))
 
     def draw_hud(self):
         # Timer (top center)
@@ -333,15 +428,36 @@ class RaceGame:
         speed_surf = small_font.render(f"SPD {speed_str}", True, WHITE)
         screen.blit(speed_surf, (SCREEN_WIDTH - 100, 20))
 
+        score_surf = font.render(f"SCORE {self.score}", True, YELLOW)
+        screen.blit(score_surf, (18, 58))
+
+        controls = small_font.render("SHIFT + LEFT/RIGHT: DRIFT   PURPLE BOX: BOOST", True, WHITE)
+        screen.blit(controls, (18, SCREEN_HEIGHT - 26))
+
         # Distance progress bars (right side, like the reference's meters)
         draw_progress_bar(screen, SCREEN_WIDTH - 230, 70, 200, 22, self.distance / 3000, RED, "YOU")
         draw_progress_bar(screen, SCREEN_WIDTH - 230, 118, 200, 22, self.ai_distance / 3000, YELLOW, "AI")
+
+        # Full-race overview: the moving scene is zoomed in for driving, while
+        # this compact map keeps the entire straight track visible.
+        map_x, map_y, map_w, map_h = 18, 92, 42, 180
+        draw_panel(screen, (map_x - 6, map_y - 24, map_w + 12, map_h + 34), alpha=180)
+        pygame.draw.rect(screen, ROAD_GRAY, (map_x, map_y, map_w, map_h))
+        pygame.draw.line(screen, WHITE, (map_x, map_y), (map_x + map_w, map_y), 3)
+        player_marker_y = map_y + map_h - int(min(self.distance / 3000, 1) * map_h)
+        ai_marker_y = map_y + map_h - int(min(self.ai_distance / 3000, 1) * map_h)
+        pygame.draw.circle(screen, RED, (map_x + 13, player_marker_y), 5)
+        pygame.draw.circle(screen, YELLOW, (map_x + map_w - 13, ai_marker_y), 5)
+        map_label = small_font.render("TRACK", True, WHITE)
+        screen.blit(map_label, (map_x - 2, map_y + map_h + 5))
 
     def draw(self):
         self.draw_track()
 
         for obstacle in self.obstacles:
             obstacle.draw(screen)
+        for item_box in self.item_boxes:
+            item_box.draw(screen)
 
         self.player_car.draw(screen)
         self.ai_car.draw(screen)

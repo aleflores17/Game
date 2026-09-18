@@ -12,7 +12,10 @@ A top-down racing game where you compete against an AI opponent to reach 3000 di
 - **DOWN ARROW**: Brake/Reverse
 - **LEFT ARROW**: Steer left
 - **RIGHT ARROW**: Steer right
+- **SHIFT + LEFT/RIGHT**: Drift; release after charging for a boost
+- **PURPLE ITEM BOXES**: Collect them for a temporary speed boost
 - Avoid gray obstacles on the road
+- A checkered **FINISH** line appears near the end of the 3000-distance race
 - First to reach 3000 distance wins!
 - Press `SPACE` to restart after game ends
 - Press `ESC` to exit
